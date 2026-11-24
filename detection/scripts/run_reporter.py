@@ -37,7 +37,7 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument('--blast-ground-truth', action='store_true',
                         help='tick if you have blast-based ground truth [True]', default=True)
     parser.add_argument('--convert-gene-name', action='store_true', help='convert gene allele to gene name [True]',
-                        default=True)
+                        default=False)
     return parser.parse_args()
 
 
@@ -49,12 +49,11 @@ def _check_arguments(arguments: argparse.Namespace) -> argparse.Namespace:
     """
     if not arguments.ground_truth:
         raise ValueError("Ground truth file not given.")
-    if not arguments.coverage_amr_genes:
-        raise ValueError("Coverage of the AMR genes file not given.")
+    #     raise ValueError("Coverage of the AMR genes file not given.")
 
     if not Path(arguments.ground_truth).exists():
         raise ValueError(f"Ground truth file {arguments.ground_truth} not found.")
-    if not Path(arguments.coverage_amr_genes).exists():
+    if arguments.coverage_amr_genes and not Path(arguments.coverage_amr_genes).exists():
         raise ValueError(f"Coverage AMR genes file {arguments.coverage_amr_genes} not found.")
     return arguments
 
@@ -71,12 +70,14 @@ def _format_gene_id(arguments: argparse.Namespace, gene: str, correspondence_dic
         try:
             gene = correspondence_dict[gene]['gene']
         except KeyError:
-            pass
+            logging.warning(f"Could not find gene {gene} in the correspondence table from NCBI. "
+                            "This happens with Argo. Returning gene name.")
     else:
         try:
             gene = correspondence_dict[gene]['allele']
         except KeyError:
-            pass
+            logging.warning(f"Could not find gene {gene} in the correspondence table from NCBI. "
+                            "This happens with Argo. Returning gene name.")
     return gene
 
 
@@ -91,6 +92,8 @@ def _retrieve_amr(arguments: argparse.Namespace, correspondence_dict: dict = Non
     tools_config = load_tools_config()
     tool_correspondence = {tool: tools_config[tool]['clean_name'] for tool in tools_config.keys()}
     for json_output in glob.glob(f"{arguments.dir_in}/*/*_cleaned.json"):
+        if not Path(json_output).exists():
+            logging.error(f'JSON file {json_output} not found. Exiting...')
         tool = tool_correspondence[Path(json_output).parent.name]
         result[tool] = []
         json_dictionary = json.load(open(json_output))
@@ -102,7 +105,7 @@ def _retrieve_amr(arguments: argparse.Namespace, correspondence_dict: dict = Non
     return result
 
 
-def _retrieve_blast_ground_truth(arguments: argparse.Namespace, genes_covered_df: pd.DataFrame, output_dir: Path,
+def _retrieve_blast_ground_truth(arguments: argparse.Namespace, genes_covered_df: pd.DataFrame | None, output_dir: Path,
                                  correspondence_dict: dict = None) -> pd.DataFrame:
     """
     Retrieves ground truth from blast-based approach.
@@ -112,19 +115,25 @@ def _retrieve_blast_ground_truth(arguments: argparse.Namespace, genes_covered_df
     :param correspondence_dict: NDARO allele to gene correspondence dictionary
     :return: Dataframe of ground truth AMR genes
     """
-    genes_covered_dict = dict(zip(genes_covered_df['type_gene'], genes_covered_df['coverage']))
     with open(arguments.ground_truth) as handle:
         ground_truth_dataframe = pd.read_csv(handle, sep='\t', header=0, usecols=[1, 2, 3, 4],
                                              names=['gene', 'identity', 'coverage', 'genome'])
-        ground_truth_dataframe_covered = ground_truth_dataframe[
-            ground_truth_dataframe['gene'].isin(genes_covered_dict.keys())]
-        ground_truth_dataframe_covered['seq_coverage'] = ground_truth_dataframe_covered['gene'].map(genes_covered_dict)
-        ground_truth_dataframe_covered['coverage'] = list(
-            map(lambda x: eval(x) * 100, ground_truth_dataframe_covered['coverage']))
+        if genes_covered_df:
+            genes_covered_dict = dict(zip(genes_covered_df['type_gene'], genes_covered_df['coverage']))
+            ground_truth_dataframe_covered = ground_truth_dataframe[
+                ground_truth_dataframe['gene'].isin(genes_covered_dict.keys())]
+            ground_truth_dataframe_covered['seq_coverage'] = ground_truth_dataframe_covered['gene'].map(genes_covered_dict)
+            ground_truth_dataframe_covered['coverage'] = list(
+                map(lambda x: eval(x) * 100, ground_truth_dataframe_covered['coverage']))
+        else:
+            ground_truth_dataframe_covered = ground_truth_dataframe
         new_gene_id = []
         if arguments.convert_gene_name:
             for gene in ground_truth_dataframe_covered['gene']:
                 new_gene_id.append([v['gene'] for k, v in correspondence_dict.items() if gene == v['allele']][0])
+        else:
+            for gene in ground_truth_dataframe_covered['gene']:
+                new_gene_id.append([v['allele'] for k, v in correspondence_dict.items() if gene == v['allele']][0])
         ground_truth_dataframe_covered['gene'] = new_gene_id
     output_file = Path(output_dir, 'updated_ground_truth.tsv')
     ground_truth_dataframe_covered.to_csv(output_file, sep='\t', index=False)
@@ -191,7 +200,10 @@ def _generate_summary(stats_dictionary: dict, output_tsv: Path, config_dict: dic
                 if isinstance(stats_dictionary[tool][stat], float):
                     to_write = f'{tool}\t{stat}\t{stats_dictionary[tool][stat]}\n'
                 else:
-                    to_write = f'{tool}\t{stat}\t{",".join(list(stats_dictionary[tool][stat]))}\n'
+                    try:
+                        to_write = f'{tool}\t{stat}\t{",".join(list(stats_dictionary[tool][stat]))}\n'
+                    except TypeError:
+                        to_write = f'{tool}\t{stat}\tNone\n'
                 handle.write(to_write)
 
 
@@ -207,7 +219,10 @@ def main() -> None:
     args = _check_arguments(_parse_arguments())
     config_dictionary = yaml.safe_load(open(args.configfile))
 
-    genes_covered_table = pd.read_table(args.coverage_amr_genes, usecols=['type_gene', 'coverage'])
+    genes_covered_table = None
+    if args.coverage_amr_genes:
+        genes_covered_table = pd.read_table(args.coverage_amr_genes, usecols=['type_gene', 'coverage'])
+
     level = 'gene' if args.convert_gene_name else 'allele'
     output_directory = Path(f'{args.dir_out}/{args.sample_name}/reporter_{level}')
     report_directory = Path(f'{args.dir_out}/{args.sample_name}/reporter_{level}/report')

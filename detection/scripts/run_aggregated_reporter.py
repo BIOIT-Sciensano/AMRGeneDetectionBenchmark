@@ -90,10 +90,11 @@ def _retrieve_statistics_information(arguments: argparse.Namespace,
         for stat in output_dictionary[dataset][level].keys():
             for tool in output_dictionary[dataset][level][stat].keys():
                 if tool in arguments.list_of_tools:
+                    if output_dictionary[dataset][level][stat][tool] == 'None':
+                        output_dictionary[dataset][level][stat][tool] = None
                     data_list.append([dataset, level, stat, tool,
                                       output_dictionary[dataset][level][stat][tool],
                                       output_dictionary[dataset]['Chemistry']])
-
     final_statistics_df = pd.DataFrame(data_list, columns=['dataset', 'level', 'stat', 'tool', 'value', 'Chemistry'])
     final_statistics_df["value"] = pd.to_numeric(final_statistics_df["value"])
     return final_statistics_df
@@ -159,7 +160,7 @@ def _retrieve_precision_recall_files(arguments: argparse.Namespace,
     """
     range_thresholds = list(range(50, 105, 5))
     report_directory = Path(f'reporter_{arguments.type}')
-    pr_files = glob.glob(str(Path(arguments.dir_in) / '*' / report_directory / '*_precision_recall*'))
+    pr_files = glob.glob(str(Path(arguments.dir_in) / '*' / report_directory / '*' / '*_precision_recall*.csv'))
     output_auprc_table = []
     mock_name_correspondence = {}
     if datasets_configuration is not None:
@@ -168,6 +169,8 @@ def _retrieve_precision_recall_files(arguments: argparse.Namespace,
 
     with open(Path(arguments.dir_out) / 'auprc.tsv', 'a') as output_file:
         for table in [Path(x) for x in pr_files]:
+            if not table.exists():
+                logging.error(f'File {table} does not exist.')
             input_table = pd.read_csv(table, header=0, sep=';')
             input_table[['Coverage_threshold', 'Identity_threshold']] = (
                 input_table[['Coverage_threshold', 'Identity_threshold']].apply(pd.to_numeric))
@@ -182,7 +185,6 @@ def _retrieve_precision_recall_files(arguments: argparse.Namespace,
                 for threshold in range_thresholds:
                     auc_coverage = _calculate_auc_from_subtable(input_table, 'Coverage_threshold', threshold)
                     auc_identity = _calculate_auc_from_subtable(input_table, 'Identity_threshold', threshold)
-
                     output_file.write(f'{tool}\t{auc_coverage}\tcoverage\t{threshold}\t{level}\t{dataset}\n')
                     output_file.write(f'{tool}\t{auc_identity}\tidentity\t{threshold}\t{level}\t{dataset}\n')
                     output_auprc_table.append([tool, auc_coverage, 'Coverage', threshold, level, dataset])
@@ -253,7 +255,7 @@ def _compute_mean_value_across_datasets(arguments: argparse.Namespace) -> pd.Dat
     """
     range_thresholds = list(range(50, 105, 5))
     directory_report = Path(f'reporter_{arguments.type}')
-    pr_files = glob.glob(str(Path(arguments.dir_in) / '*' / directory_report / '*_precision_recall*'))
+    pr_files = glob.glob(str(Path(arguments.dir_in) / '*' / directory_report / '*' / '*_precision_recall*.csv'))
     pr_table_list_for_df = []
     for pr_table in [Path(pr_file_path) for pr_file_path in pr_files]:
         tool = pr_table.stem.split('_')[0]
@@ -266,13 +268,12 @@ def _compute_mean_value_across_datasets(arguments: argparse.Namespace) -> pd.Dat
                                                               'identity_threshold', 'level', 'tool', 'dataset'])
     pr_table_df[['coverage_threshold', 'identity_threshold', 'precision', 'recall']] = (
         pr_table_df[['coverage_threshold', 'identity_threshold', 'precision', 'recall']].apply(pd.to_numeric))
-
     mean_metrics_list_for_df = []
     for id_threshold in range_thresholds:
         for cov_threshold in range_thresholds:
             subtable_to_consider = pr_table_df[(pr_table_df['coverage_threshold'] == cov_threshold) &
                                                (pr_table_df['identity_threshold'] == id_threshold)]
-            for level in ['gene']:
+            for level in ['gene', 'allele']:
                 subtable_level = subtable_to_consider[subtable_to_consider['level'] == level]
                 subtable_level['f1'] = subtable_level.apply(_f1_score, axis=1)
                 for tool in set(subtable_level['tool']):

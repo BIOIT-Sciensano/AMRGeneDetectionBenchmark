@@ -4,7 +4,7 @@ This framework can be used to benchmark gene performance directly from long-read
 1. Perform gene detection on long-read data using various tools;
 2. Generate HTML reports summarizing the main findings, for either a single sample (sample reporter) or across all samples (aggregated reporter).
 
-Version: **1.0**
+Version: **1.2**
 
 Test files, as well as the databases, ground truths and genes covered are available in [Zenodo](10.5281/zenodo.18458145). 
 
@@ -15,7 +15,7 @@ Test files, as well as the databases, ground truths and genes covered are availa
 The current codebase runs on python 3.12, and all python dependencies are listed in the associated requirements.txt file, but the environment is installable via pip as follows:
 
 ```{bash}
-git clone https://github.com/BioinformaticsPlatformWIV-ISP/AMRGeneDetectionBenchmark.git
+git clone https://github.com/BIOIT-Sciensano/AMRGeneDetectionBenchmark.git
 cd AMRGeneDetectionBenchmark/
 python3.12 -m venv amr_gene_detection_venv
 source amr_gene_detection_venv/bin/activate

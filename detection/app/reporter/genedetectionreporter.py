@@ -113,7 +113,6 @@ class GeneDetectionReporter(BaseReporter):
             pandas_stats.insert(2, 'tool', str(tool))
             pandas_stats['value'] = pd.to_numeric(pandas_stats['value'])
             pandas_stats['statistic'] = pd.Categorical(pandas_stats['statistic'], stats_to_keep)
-
             if combined_stats is False:
                 combined_stats = pandas_stats.copy()
             else:
